@@ -1,2 +1,1 @@
-# youfromstar-android
-youfromstar-android
+# astro_android_apk

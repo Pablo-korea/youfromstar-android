@@ -1,0 +1,31 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'com.example.app'  // 네임스페이스 추가
+    compileSdk 34  // compileSdkVersion -> compileSdk로 변경
+
+    defaultConfig {
+        applicationId "com.youfromstar.app"
+        minSdk 21  // minSdkVersion -> minSdk로 변경
+        targetSdkVersion 35
+        versionCode 9
+        versionName "1.0.8"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation "androidx.appcompat:appcompat:1.7.0"
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation "androidx.browser:browser:1.8.0"
+    implementation "com.android.billingclient:billing-ktx:6.2.1"
+    implementation "androidx.core:core-ktx:1.12.0"
+    implementation "com.google.android.material:material:1.12.0"
+}

@@ -1,0 +1,18 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
+buildscript {
+    repositories {
+        google()  // 여기에 Google 저장소가 추가되어 있는지 확인
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.6.0'  // 최신 Gradle 플러그인 버전 사용
+    }
+}
+
+allprojects {
+    repositories {
+        google()  // 여기에 Google 저장소가 추가되어 있는지 확인
+        mavenCentral()
+    }
+}
