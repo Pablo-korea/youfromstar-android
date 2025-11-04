@@ -10,9 +10,11 @@ import android.net.MailTo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.speech.tts.TextToSpeech;          // ✅ 추가: TTS
 import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
+import android.webkit.JavascriptInterface;       // ✅ 추가: JS 브릿지 어노테이션
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -25,12 +27,14 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.browser.customtabs.CustomTabsIntent;
 
-// ✅ 추가: insets 유틸 (시스템바 높이만큼 패딩)
+// ✅ insets 유틸 (시스템바 높이만큼 패딩)
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.WindowInsetsControllerCompat;
+
+import java.util.Locale;                          // ✅ 추가: 언어 태그용
 
 public class MainActivity extends AppCompatActivity {
 
@@ -41,6 +45,11 @@ public class MainActivity extends AppCompatActivity {
     private static final int BACK_INTERVAL = 2000;
 
     private BillingHelper billing;
+
+    // ✅ 추가: 네이티브 TTS 인스턴스
+    private TextToSpeech tts;
+    private float ttsRate = 1.0f;
+    private float ttsPitch = 1.0f;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -63,7 +72,7 @@ public class MainActivity extends AppCompatActivity {
                 | WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS
                 | WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION);
 
-        // ✅ One UI 기기에서 bars를 “보이도록” 명시
+        // One UI 기기에서 bars를 “보이도록” 명시
         WindowInsetsControllerCompat controller = ViewCompat.getWindowInsetsController(decor);
         if (controller != null) {
             controller.show(WindowInsetsCompat.Type.statusBars() | WindowInsetsCompat.Type.navigationBars());
@@ -89,10 +98,14 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setBuiltInZoomControls(true);
         webSettings.setDisplayZoomControls(false);
         webSettings.setCacheMode(WebSettings.LOAD_NO_CACHE);
+        webSettings.setMediaPlaybackRequiresUserGesture(false); // ✅ 음성 관련 제스처 완화
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        }
         myWebView.clearCache(true);
         myWebView.clearHistory();
 
-        // ✅ 시스템바 인셋만큼 안전 패딩(특히 하단) 부여 → 겹침 방지
+        // 시스템바 인셋만큼 안전 패딩(특히 하단) 부여 → 겹침 방지
         ViewCompat.setOnApplyWindowInsetsListener(myWebView, (v, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             v.setPadding(0, bars.top, 0, bars.bottom);
@@ -116,8 +129,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
-                // 필요 시만 사용하세요. (헤더 강제 숨김은 일단 비활성화를 권장)
-                // myWebView.loadUrl("javascript:(function(){var h=document.querySelector('header');if(h){h.style.display='none';}})()");
+                // 필요 시만 사용
             }
         });
 
@@ -153,24 +165,41 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        // ✅ 네이티브 TTS 초기화
+        tts = new TextToSpeech(getApplicationContext(), status -> {
+            if (status == TextToSpeech.SUCCESS) {
+                int r = tts.setLanguage(Locale.KOREAN);
+                if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    Log.w(TAG, "Korean TTS not supported, keep default");
+                }
+                tts.setSpeechRate(ttsRate);
+                tts.setPitch(ttsPitch);
+            } else {
+                Log.e(TAG, "TTS init failed: " + status);
+            }
+        });
+
         // Billing
         billing = new BillingHelper(this, myWebView);
         billing.start();
         myWebView.addJavascriptInterface(new WebAppInterface(this, billing), "AndroidBilling");
 
-        // onCreate() 끝부분과 onResume()에도 넣어 주세요.
+        // ✅ 추가: 프론트에서 window.AndroidTTS.* 사용 가능
+        myWebView.addJavascriptInterface(new AndroidTTSBridge(), "AndroidTTS");
+
+        // 상태바/내비바 색
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            getWindow().setStatusBarColor(0xFFFFFFFF); // 흰색 (원하시면 브랜드 색)
+            getWindow().setStatusBarColor(0xFFFFFFFF); // 흰색
             getWindow().setNavigationBarColor(0xFF000000);  // 검정
         }
         decor = getWindow().getDecorView();
-        androidx.core.view.WindowInsetsControllerCompat c =
-                androidx.core.view.ViewCompat.getWindowInsetsController(decor);
+        WindowInsetsControllerCompat c =
+                ViewCompat.getWindowInsetsController(decor);
         if (c != null) {
-            c.setAppearanceLightStatusBars(false);       // 밝은(화이트) 아이콘
+            c.setAppearanceLightStatusBars(false);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                c.setAppearanceLightStatusBars(true); // ✅ 흰 배경 + '검정' 아이콘
+                c.setAppearanceLightStatusBars(true);  // 흰 배경 + 검정 아이콘
                 c.setAppearanceLightNavigationBars(false);
             }
         }
@@ -179,9 +208,51 @@ public class MainActivity extends AppCompatActivity {
         myWebView.loadUrl(HOME_URL);
     }
 
-    // ❌ 전체화면 유도 코드(숨김)는 전부 제거했습니다.
-    //  - hideSystemUI() 메서드 삭제
-    //  - onWindowFocusChanged()에서 hideSystemUI() 호출 삭제
+    // ======= ✅ JS → 네이티브 TTS 브릿지 =======
+    public class AndroidTTSBridge {
+        @JavascriptInterface
+        public void readText(String text, String lang, String rateStr, String pitchStr) {
+            if (text == null || text.trim().isEmpty() || tts == null) return;
+
+            try {
+                float rate = parseFloatSafe(rateStr, 1.0f);
+                float pitch = parseFloatSafe(pitchStr, 1.0f);
+                ttsRate = clamp(rate, 0.5f, 2.0f);
+                ttsPitch = clamp(pitch, 0.5f, 2.0f);
+
+                if (lang != null && !lang.isEmpty()) {
+                    try {
+                        int r = tts.setLanguage(Locale.forLanguageTag(lang)); // "ko-KR" 등
+                        if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
+                            Log.w(TAG, "Lang not supported: " + lang);
+                        }
+                    } catch (Exception ignored) {}
+                }
+                tts.setSpeechRate(ttsRate);
+                tts.setPitch(ttsPitch);
+
+                tts.stop(); // 중복 방지
+                tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "youfromstar-tts");
+            } catch (Exception e) {
+                Log.e(TAG, "AndroidTTS.readText error", e);
+            }
+        }
+
+        @JavascriptInterface
+        public void stop() {
+            try {
+                if (tts != null) tts.stop();
+            } catch (Exception ignored) {}
+        }
+
+        private float parseFloatSafe(String s, float def) {
+            try { return Float.parseFloat(s); } catch (Exception e) { return def; }
+        }
+
+        private float clamp(float v, float min, float max) {
+            return Math.max(min, Math.min(max, v));
+        }
+    }
 
     // ======= 공통 URL 핸들러 =======
     private boolean handleUrlOverride(String url) {
@@ -330,23 +401,30 @@ public class MainActivity extends AppCompatActivity {
             controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_DEFAULT);
         }
 
-        // onCreate() 끝부분과 onResume()에도 넣어 주세요.
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            getWindow().setStatusBarColor(0xFFFFFFFF); // 흰색 (원하시면 브랜드 색)
+            getWindow().setStatusBarColor(0xFFFFFFFF); // 흰색
             getWindow().setNavigationBarColor(0xFF000000);  // 검정
         }
-        decor = getWindow().getDecorView();
-        androidx.core.view.WindowInsetsControllerCompat c =
-                androidx.core.view.ViewCompat.getWindowInsetsController(decor);
+        WindowInsetsControllerCompat c = ViewCompat.getWindowInsetsController(decor);
         if (c != null) {
-            c.setAppearanceLightStatusBars(false);       // 밝은(화이트) 아이콘
+            c.setAppearanceLightStatusBars(false);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                c.setAppearanceLightStatusBars(true); // ✅ 흰 배경 + '검정' 아이콘
+                c.setAppearanceLightStatusBars(true); // 흰 배경 + '검정' 아이콘
                 c.setAppearanceLightNavigationBars(false);
             }
         }
+    }
 
+    @Override
+    protected void onDestroy() {
+        // ✅ TTS 정리
+        if (tts != null) {
+            try { tts.stop(); } catch (Exception ignored) {}
+            try { tts.shutdown(); } catch (Exception ignored) {}
+            tts = null;
+        }
+        super.onDestroy();
     }
 
     @Override
