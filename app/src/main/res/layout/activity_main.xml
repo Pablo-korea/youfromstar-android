@@ -1,12 +1,25 @@
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:fitsSystemWindows="true">  <!-- ✅ 추가 -->
+    android:background="#CCCCCC"
+    android:fitsSystemWindows="true">
 
-    <WebView
+    <!-- ✅ WebView를 담는 흰색 컨테이너 -->
+    <LinearLayout
+    android:id="@+id/web_container"
+    android:layout_width="wrap_content"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+    android:background="#FFFFFF"
+    android:layout_gravity="center_horizontal">
+
+        <WebView
         android:id="@+id/webview"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
-</LinearLayout>
+    </LinearLayout>
+
+</FrameLayout>

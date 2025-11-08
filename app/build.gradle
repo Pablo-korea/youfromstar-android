@@ -1,21 +1,29 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace 'com.example.app'  // 네임스페이스 추가
-    compileSdk 34  // compileSdkVersion -> compileSdk로 변경
+    namespace 'com.example.app'
+    compileSdk 35
 
     defaultConfig {
         applicationId "com.youfromstar.app"
-        minSdk 21  // minSdkVersion -> minSdk로 변경
-        targetSdkVersion 35
-        versionCode 9
-        versionName "1.0.8"
+        minSdk 21
+        targetSdk 35          // ← 최신 DSL
+        versionCode 14
+        versionName "1.0.13"
     }
 
     buildTypes {
         release {
+            // ✅ 릴리스 최적화 켜기 (AAB 실사용 설정)
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
+                    'proguard-rules.pro'
+        }
+        debug {
+            // 디버그는 편의상 끔
             minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            shrinkResources false
         }
     }
 }

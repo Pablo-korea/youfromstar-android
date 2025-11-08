@@ -10,11 +10,13 @@ import android.net.MailTo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.speech.tts.TextToSpeech;          // ✅ 추가: TTS
+import android.os.Handler;                  // ✅ 추가
+import android.os.Looper;                 // ✅ 추가
+import android.speech.tts.TextToSpeech;   // ✅ TTS
 import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
-import android.webkit.JavascriptInterface;       // ✅ 추가: JS 브릿지 어노테이션
+import android.webkit.JavascriptInterface; // ✅ JS 브릿지 어노테이션
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -24,17 +26,21 @@ import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 import androidx.annotation.Nullable;
+import androidx.annotation.Keep;           // ✅ (권장) R8 보존 힌트
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.browser.customtabs.CustomTabsIntent;
 
-// ✅ insets 유틸 (시스템바 높이만큼 패딩)
-import androidx.core.view.ViewCompat;
+import androidx.core.view.ViewCompat;    // insets 유틸
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.WindowInsetsControllerCompat;
 
-import java.util.Locale;                          // ✅ 추가: 언어 태그용
+import java.util.Locale;                  // 언어 태그용
+import android.content.res.Configuration;
+import androidx.annotation.NonNull;
+import android.view.ViewGroup;
+
 
 public class MainActivity extends AppCompatActivity {
 
@@ -46,10 +52,35 @@ public class MainActivity extends AppCompatActivity {
 
     private BillingHelper billing;
 
-    // ✅ 추가: 네이티브 TTS 인스턴스
+    private static final int MAX_WIDTH_DP = 420; // 갤럭시 S 울트라급
+
+    // ✅ 네이티브 TTS
     private TextToSpeech tts;
     private float ttsRate = 1.0f;
     private float ttsPitch = 1.0f;
+    private volatile boolean ttsReady = false;                 // ✅ 준비 플래그
+    private final Handler mainHandler = new Handler(Looper.getMainLooper()); // ✅ 재시도용
+
+    private void applyWebViewWidthLimit() {
+        if (myWebView == null) return;
+        View parent = (View) myWebView.getParent();
+        if (parent == null) return;
+
+        parent.post(() -> {
+            float density = getResources().getDisplayMetrics().density;
+            int maxPx = Math.round(MAX_WIDTH_DP * density);
+            int parentW = parent.getWidth();
+            if (parentW == 0) return;
+
+            int target = Math.min(parentW, maxPx);
+
+            ViewGroup.LayoutParams lp = myWebView.getLayoutParams();
+            lp.width = target;                // ✅ 최대폭 제한
+            myWebView.setLayoutParams(lp);
+            // 높이는 match_parent 그대로
+        });
+    }
+
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -72,7 +103,7 @@ public class MainActivity extends AppCompatActivity {
                 | WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS
                 | WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION);
 
-        // One UI 기기에서 bars를 “보이도록” 명시
+        // 시스템바 보이도록
         WindowInsetsControllerCompat controller = ViewCompat.getWindowInsetsController(decor);
         if (controller != null) {
             controller.show(WindowInsetsCompat.Type.statusBars() | WindowInsetsCompat.Type.navigationBars());
@@ -82,9 +113,9 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         myWebView = findViewById(R.id.webview);
 
-        if (getSupportActionBar() != null) {
-            getSupportActionBar().hide();
-        }
+        applyWebViewWidthLimit();   // ✅ 추가
+
+        if (getSupportActionBar() != null) getSupportActionBar().hide();
 
         // WebView 설정
         WebSettings webSettings = myWebView.getSettings();
@@ -98,18 +129,18 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setBuiltInZoomControls(true);
         webSettings.setDisplayZoomControls(false);
         webSettings.setCacheMode(WebSettings.LOAD_NO_CACHE);
-        webSettings.setMediaPlaybackRequiresUserGesture(false); // ✅ 음성 관련 제스처 완화
+        webSettings.setMediaPlaybackRequiresUserGesture(false);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         }
         myWebView.clearCache(true);
         myWebView.clearHistory();
 
-        // 시스템바 인셋만큼 안전 패딩(특히 하단) 부여 → 겹침 방지
+        // 인셋 패딩
         ViewCompat.setOnApplyWindowInsetsListener(myWebView, (v, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             v.setPadding(0, bars.top, 0, bars.bottom);
-            return insets; // 소비하지 않음
+            return insets;
         });
 
         // WebViewClient
@@ -144,9 +175,7 @@ public class MainActivity extends AppCompatActivity {
                     public void onPageStarted(WebView v, String url, Bitmap favicon) {
                         if (url != null) {
                             boolean handled = MainActivity.this.handleUrlOverride(url);
-                            if (!handled) {
-                                myWebView.loadUrl(url);
-                            }
+                            if (!handled) myWebView.loadUrl(url);
                         }
                         try { v.stopLoading(); } catch (Exception ignored) {}
                         try { v.destroy(); } catch (Exception ignored) {}
@@ -165,15 +194,21 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // ✅ 네이티브 TTS 초기화
+        // ✅ TTS 초기화
         tts = new TextToSpeech(getApplicationContext(), status -> {
             if (status == TextToSpeech.SUCCESS) {
                 int r = tts.setLanguage(Locale.KOREAN);
                 if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    Log.w(TAG, "Korean TTS not supported, keep default");
+                    Log.w(TAG, "Korean TTS not supported or missing data");
+                    // (선택) 언어 데이터 설치 유도
+                    try {
+                        startActivity(new Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA));
+                    } catch (Exception ignored) {}
                 }
                 tts.setSpeechRate(ttsRate);
                 tts.setPitch(ttsPitch);
+                ttsReady = true;                                   // ✅ 준비 완료!
+                Log.d(TAG, "TTS ready");
             } else {
                 Log.e(TAG, "TTS init failed: " + status);
             }
@@ -184,22 +219,20 @@ public class MainActivity extends AppCompatActivity {
         billing.start();
         myWebView.addJavascriptInterface(new WebAppInterface(this, billing), "AndroidBilling");
 
-        // ✅ 추가: 프론트에서 window.AndroidTTS.* 사용 가능
+        // ✅ JS → 네이티브 TTS 브릿지 (내부클래스 사용)
         myWebView.addJavascriptInterface(new AndroidTTSBridge(), "AndroidTTS");
 
-        // 상태바/내비바 색
+        // 시스템 바 색
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            getWindow().setStatusBarColor(0xFFFFFFFF); // 흰색
-            getWindow().setNavigationBarColor(0xFF000000);  // 검정
+            getWindow().setStatusBarColor(0xFFFFFFFF);
+            getWindow().setNavigationBarColor(0xFF000000);
         }
-        decor = getWindow().getDecorView();
-        WindowInsetsControllerCompat c =
-                ViewCompat.getWindowInsetsController(decor);
+        WindowInsetsControllerCompat c = ViewCompat.getWindowInsetsController(decor);
         if (c != null) {
             c.setAppearanceLightStatusBars(false);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                c.setAppearanceLightStatusBars(true);  // 흰 배경 + 검정 아이콘
+                c.setAppearanceLightStatusBars(true);
                 c.setAppearanceLightNavigationBars(false);
             }
         }
@@ -209,10 +242,24 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ======= ✅ JS → 네이티브 TTS 브릿지 =======
+    @Keep // ✅ (권장) R8이 내부클래스/이름을 유지하도록 힌트
     public class AndroidTTSBridge {
-        @JavascriptInterface
-        public void readText(String text, String lang, String rateStr, String pitchStr) {
+
+        @JavascriptInterface @Keep
+        public String ping() {                 // ✅ 진단용: 설치본에서 콘솔로 확인 가능
+            return "pong";
+        }
+
+        @JavascriptInterface @Keep
+        public void readText(final String text, final String lang, final String rateStr, final String pitchStr) {
             if (text == null || text.trim().isEmpty() || tts == null) return;
+
+            // ✅ TTS가 아직 준비 전이면 잠시 후 재시도 (설치 직후/첫 실행 케이스 방지)
+            if (!ttsReady) {
+                Log.d(TAG, "TTS not ready yet. retry in 300ms");
+                mainHandler.postDelayed(() -> readText(text, lang, rateStr, pitchStr), 300);
+                return;
+            }
 
             try {
                 float rate = parseFloatSafe(rateStr, 1.0f);
@@ -232,17 +279,16 @@ public class MainActivity extends AppCompatActivity {
                 tts.setPitch(ttsPitch);
 
                 tts.stop(); // 중복 방지
-                tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "youfromstar-tts");
+                int res = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "youfromstar-tts");
+                Log.d(TAG, "tts.speak result=" + res);
             } catch (Exception e) {
                 Log.e(TAG, "AndroidTTS.readText error", e);
             }
         }
 
-        @JavascriptInterface
+        @JavascriptInterface @Keep
         public void stop() {
-            try {
-                if (tts != null) tts.stop();
-            } catch (Exception ignored) {}
+            try { if (tts != null) tts.stop(); } catch (Exception ignored) {}
         }
 
         private float parseFloatSafe(String s, float def) {
@@ -392,6 +438,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    public void onConfigurationChanged(@NonNull Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        applyWebViewWidthLimit();   // ✅ 방향/화면 변경 시 재적용
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         View decor = getWindow().getDecorView();
@@ -403,14 +455,14 @@ public class MainActivity extends AppCompatActivity {
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            getWindow().setStatusBarColor(0xFFFFFFFF); // 흰색
-            getWindow().setNavigationBarColor(0xFF000000);  // 검정
+            getWindow().setStatusBarColor(0xFFFFFFFF);
+            getWindow().setNavigationBarColor(0xFF000000);
         }
         WindowInsetsControllerCompat c = ViewCompat.getWindowInsetsController(decor);
         if (c != null) {
             c.setAppearanceLightStatusBars(false);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                c.setAppearanceLightStatusBars(true); // 흰 배경 + '검정' 아이콘
+                c.setAppearanceLightStatusBars(true);
                 c.setAppearanceLightNavigationBars(false);
             }
         }
@@ -419,6 +471,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         // ✅ TTS 정리
+        ttsReady = false;
         if (tts != null) {
             try { tts.stop(); } catch (Exception ignored) {}
             try { tts.shutdown(); } catch (Exception ignored) {}

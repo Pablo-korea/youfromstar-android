@@ -1,17 +1,19 @@
-# Add project specific ProGuard rules here.
-# By default, the flags in this file are appended to flags specified
-# in /Applications/Utilities/sdk/tools/proguard/proguard-android.txt
-# You can edit the include path and order by changing the proguardFiles
-# directive in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# ✅ WebView JS 인터페이스 메서드 보존 (범용)
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keepclasseswithmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
 
-# Add any project specific keep options here:
+# ✅ 어노테이션/내부클래스 메타데이터 보존
+-keepattributes *Annotation*, InnerClasses, EnclosingMethod
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# ✅ 웹뷰 관련 클래스 이름 유지 (보수적 권장)
+-keep class * extends android.app.Activity { *; }
+-keep class * extends android.webkit.WebViewClient { *; }
+-keep class * extends android.webkit.WebChromeClient { *; }
+
+# ✅ 우리 브릿지 클래스 통째 보존 (패키지 경로 확인!)
+-keep class com.example.app.MainActivity$AndroidTTSBridge { *; }
+-keep class com.example.app.WebAppInterface { *; }
