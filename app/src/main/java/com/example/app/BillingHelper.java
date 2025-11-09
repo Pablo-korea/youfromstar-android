@@ -2,6 +2,7 @@
 package com.example.app;
 
 import android.app.Activity;
+import android.util.Log;
 import android.webkit.WebView;
 
 import androidx.annotation.NonNull;
@@ -18,6 +19,7 @@ public class BillingHelper implements PurchasesUpdatedListener {
     private final Activity activity;
     private final WebView webView;
     private final BillingClient client;
+    private static final String TAG = "BillingHelper";
 
     public BillingHelper(Activity activity, WebView webView) {
         this.activity = activity;
@@ -28,12 +30,49 @@ public class BillingHelper implements PurchasesUpdatedListener {
                 .build();
     }
 
+    public BillingClient getBillingClient() {   // ✅ MainActivity에서도 접근 가능하도록
+        return client;
+    }
+
+    // ✅ Billing 연결 시 미소모 구매 자동 소비
     public void start() {
         client.startConnection(new BillingClientStateListener() {
             @Override
-            public void onBillingSetupFinished(@NonNull BillingResult billingResult) { /* ready */ }
+            public void onBillingSetupFinished(@NonNull BillingResult billingResult) {
+                if (billingResult.getResponseCode() == BillingClient.BillingResponseCode.OK) {
+                    Log.d(TAG, "✅ BillingClient 연결 완료");
+                    consumeUnfinishedPurchases(); // ✅ 미소모 구매 자동 소비
+                }
+            }
+
             @Override
-            public void onBillingServiceDisconnected() { /* optional: retry */ }
+            public void onBillingServiceDisconnected() {
+                Log.w(TAG, "⚠️ BillingService 연결 끊김 - 재연결 시도 가능");
+            }
+        });
+    }
+
+    // ✅ 남아 있는 미소모 구매를 모두 소비
+    private void consumeUnfinishedPurchases() {
+        QueryPurchasesParams params = QueryPurchasesParams.newBuilder()
+                .setProductType(BillingClient.ProductType.INAPP)
+                .build();
+
+        client.queryPurchasesAsync(params, (billingResult, purchasesList) -> {
+            if (billingResult.getResponseCode() == BillingClient.BillingResponseCode.OK && purchasesList != null) {
+                for (Purchase p : purchasesList) {
+                    ConsumeParams consumeParams = ConsumeParams.newBuilder()
+                            .setPurchaseToken(p.getPurchaseToken())
+                            .build();
+                    client.consumeAsync(consumeParams, (result, token) -> {
+                        if (result.getResponseCode() == BillingClient.BillingResponseCode.OK) {
+                            Log.d(TAG, "✅ 미소모 구매 소비 완료: " + token);
+                        } else {
+                            Log.w(TAG, "⚠️ 소비 실패: " + result.getResponseCode());
+                        }
+                    });
+                }
+            }
         });
     }
 
@@ -71,12 +110,17 @@ public class BillingHelper implements PurchasesUpdatedListener {
                 String productId = p.getProducts().isEmpty() ? "" : p.getProducts().get(0);
                 sendJs("OK", productId, p.getPurchaseToken(), p.getOrderId(), null);
 
-                // 서버 검증 이후 acknowledge를 권장. (샘플에선 즉시)
-                if (!p.isAcknowledged()) {
-                    AcknowledgePurchaseParams ack = AcknowledgePurchaseParams
-                            .newBuilder().setPurchaseToken(p.getPurchaseToken()).build();
-                    client.acknowledgePurchase(ack, result -> {});
-                }
+                // ✅ 결제 후 즉시 consume (소모형 상품은 acknowledge 대신)
+                ConsumeParams consumeParams = ConsumeParams.newBuilder()
+                        .setPurchaseToken(p.getPurchaseToken())
+                        .build();
+                client.consumeAsync(consumeParams, (result, token) -> {
+                    if (result.getResponseCode() == BillingClient.BillingResponseCode.OK) {
+                        Log.d(TAG, "✅ 결제 후 즉시 소비 완료: " + token);
+                    } else {
+                        Log.w(TAG, "⚠️ 결제 소비 실패: " + result.getResponseCode());
+                    }
+                });
             }
         } else if (code == BillingClient.BillingResponseCode.USER_CANCELED) {
             sendJs("CANCELED", null, null, null, null);
