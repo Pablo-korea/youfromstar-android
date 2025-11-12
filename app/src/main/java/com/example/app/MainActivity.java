@@ -10,13 +10,13 @@ import android.net.MailTo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;                  // ✅ 추가
-import android.os.Looper;                 // ✅ 추가
-import android.speech.tts.TextToSpeech;   // ✅ TTS
+import android.os.Handler;
+import android.os.Looper;
+import android.speech.tts.TextToSpeech;
 import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
-import android.webkit.JavascriptInterface; // ✅ JS 브릿지 어노테이션
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -26,61 +26,39 @@ import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 import androidx.annotation.Nullable;
-import androidx.annotation.Keep;           // ✅ (권장) R8 보존 힌트
+import androidx.annotation.Keep;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.browser.customtabs.CustomTabsIntent;
 
-import androidx.core.view.ViewCompat;    // insets 유틸
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.WindowInsetsControllerCompat;
 
-import java.util.Locale;                  // 언어 태그용
+import java.util.Locale;
 import android.content.res.Configuration;
 import androidx.annotation.NonNull;
 import android.view.ViewGroup;
 
-
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
-    private WebView myWebView;
     private static final String HOME_URL = "https://youfromstar.odha.com/";
-    private long backPressedTime = 0;
     private static final int BACK_INTERVAL = 2000;
+    private static final int MAX_WIDTH_DP = 420;
+
+    private WebView myWebView;
+    private long backPressedTime = 0;
 
     private BillingHelper billing;
 
-    private static final int MAX_WIDTH_DP = 420; // 갤럭시 S 울트라급
-
-    // ✅ 네이티브 TTS
+    // 네이티브 TTS
     private TextToSpeech tts;
     private float ttsRate = 1.0f;
     private float ttsPitch = 1.0f;
-    private volatile boolean ttsReady = false;                 // ✅ 준비 플래그
-    private final Handler mainHandler = new Handler(Looper.getMainLooper()); // ✅ 재시도용
-
-    private void applyWebViewWidthLimit() {
-        if (myWebView == null) return;
-        View parent = (View) myWebView.getParent();
-        if (parent == null) return;
-
-        parent.post(() -> {
-            float density = getResources().getDisplayMetrics().density;
-            int maxPx = Math.round(MAX_WIDTH_DP * density);
-            int parentW = parent.getWidth();
-            if (parentW == 0) return;
-
-            int target = Math.min(parentW, maxPx);
-
-            ViewGroup.LayoutParams lp = myWebView.getLayoutParams();
-            lp.width = target;                // ✅ 최대폭 제한
-            myWebView.setLayoutParams(lp);
-            // 높이는 match_parent 그대로
-        });
-    }
-
+    private volatile boolean ttsReady = false;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -113,7 +91,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         myWebView = findViewById(R.id.webview);
 
-        applyWebViewWidthLimit();   // ✅ 추가
+        applyWebViewWidthLimit();
 
         if (getSupportActionBar() != null) getSupportActionBar().hide();
 
@@ -135,6 +113,10 @@ public class MainActivity extends AppCompatActivity {
         }
         myWebView.clearCache(true);
         myWebView.clearHistory();
+
+        // 👉 앱 WebView 식별용 UA 추가 (프론트에서 state=app 분기 시 사용 가능)
+        String originUA = webSettings.getUserAgentString();
+        webSettings.setUserAgentString(originUA + " YOUFROMSTAR_APP");
 
         // 인셋 패딩
         ViewCompat.setOnApplyWindowInsetsListener(myWebView, (v, insets) -> {
@@ -164,10 +146,11 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // 팝업 처리
+        // 팝업 / 새창 처리
         myWebView.setWebChromeClient(new WebChromeClient() {
             @Override
-            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, android.os.Message resultMsg) {
+            public boolean onCreateWindow(WebView view, boolean isDialog,
+                                          boolean isUserGesture, android.os.Message resultMsg) {
                 WebView temp = new WebView(MainActivity.this);
                 temp.getSettings().setJavaScriptEnabled(true);
                 temp.setWebViewClient(new WebViewClient() {
@@ -175,7 +158,9 @@ public class MainActivity extends AppCompatActivity {
                     public void onPageStarted(WebView v, String url, Bitmap favicon) {
                         if (url != null) {
                             boolean handled = MainActivity.this.handleUrlOverride(url);
-                            if (!handled) myWebView.loadUrl(url);
+                            if (!handled && myWebView != null) {
+                                myWebView.loadUrl(url);
+                            }
                         }
                         try { v.stopLoading(); } catch (Exception ignored) {}
                         try { v.destroy(); } catch (Exception ignored) {}
@@ -194,20 +179,19 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // ✅ TTS 초기화
+        // TTS 초기화
         tts = new TextToSpeech(getApplicationContext(), status -> {
             if (status == TextToSpeech.SUCCESS) {
                 int r = tts.setLanguage(Locale.KOREAN);
                 if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
                     Log.w(TAG, "Korean TTS not supported or missing data");
-                    // (선택) 언어 데이터 설치 유도
                     try {
                         startActivity(new Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA));
                     } catch (Exception ignored) {}
                 }
                 tts.setSpeechRate(ttsRate);
                 tts.setPitch(ttsPitch);
-                ttsReady = true;                                   // ✅ 준비 완료!
+                ttsReady = true;
                 Log.d(TAG, "TTS ready");
             } else {
                 Log.e(TAG, "TTS init failed: " + status);
@@ -219,7 +203,7 @@ public class MainActivity extends AppCompatActivity {
         billing.start();
         myWebView.addJavascriptInterface(new WebAppInterface(this, billing), "AndroidBilling");
 
-        // ✅ JS → 네이티브 TTS 브릿지 (내부클래스 사용)
+        // JS → 네이티브 TTS 브릿지
         myWebView.addJavascriptInterface(new AndroidTTSBridge(), "AndroidTTS");
 
         // 시스템 바 색
@@ -237,24 +221,42 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 첫 페이지 로드
-        myWebView.loadUrl(HOME_URL);
+        // 🔹 딥링크로 실행되었는지 먼저 확인, 아니면 첫 페이지 로드
+        if (!handleDeepLink(getIntent())) {
+            myWebView.loadUrl(HOME_URL);
+        }
     }
 
-    // ======= ✅ JS → 네이티브 TTS 브릿지 =======
-    @Keep // ✅ (권장) R8이 내부클래스/이름을 유지하도록 힌트
+    // ========= 딥링크 재진입 대응 =========
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        handleDeepLink(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleDeepLink(intent);
+    }
+
+    // ========= JS → 네이티브 TTS 브릿지 =========
+
+    @Keep
     public class AndroidTTSBridge {
 
         @JavascriptInterface @Keep
-        public String ping() {                 // ✅ 진단용: 설치본에서 콘솔로 확인 가능
+        public String ping() {
             return "pong";
         }
 
         @JavascriptInterface @Keep
-        public void readText(final String text, final String lang, final String rateStr, final String pitchStr) {
+        public void readText(final String text, final String lang,
+                             final String rateStr, final String pitchStr) {
             if (text == null || text.trim().isEmpty() || tts == null) return;
 
-            // ✅ TTS가 아직 준비 전이면 잠시 후 재시도 (설치 직후/첫 실행 케이스 방지)
             if (!ttsReady) {
                 Log.d(TAG, "TTS not ready yet. retry in 300ms");
                 mainHandler.postDelayed(() -> readText(text, lang, rateStr, pitchStr), 300);
@@ -269,7 +271,7 @@ public class MainActivity extends AppCompatActivity {
 
                 if (lang != null && !lang.isEmpty()) {
                     try {
-                        int r = tts.setLanguage(Locale.forLanguageTag(lang)); // "ko-KR" 등
+                        int r = tts.setLanguage(Locale.forLanguageTag(lang));
                         if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
                             Log.w(TAG, "Lang not supported: " + lang);
                         }
@@ -278,7 +280,7 @@ public class MainActivity extends AppCompatActivity {
                 tts.setSpeechRate(ttsRate);
                 tts.setPitch(ttsPitch);
 
-                tts.stop(); // 중복 방지
+                tts.stop();
                 int res = tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "youfromstar-tts");
                 Log.d(TAG, "tts.speak result=" + res);
             } catch (Exception e) {
@@ -288,7 +290,9 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface @Keep
         public void stop() {
-            try { if (tts != null) tts.stop(); } catch (Exception ignored) {}
+            try {
+                if (tts != null) tts.stop();
+            } catch (Exception ignored) {}
         }
 
         private float parseFloatSafe(String s, float def) {
@@ -300,7 +304,46 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // ======= 공통 URL 핸들러 =======
+    // ========= 딥링크 처리 =========
+
+    private boolean handleDeepLink(Intent intent) {
+        if (intent == null || myWebView == null) return false;
+
+        Uri data = intent.getData();
+        if (data == null) return false;
+
+        String scheme = data.getScheme();
+        String host = data.getHost();
+
+        if ("youfromstar".equalsIgnoreCase(scheme)
+                && "login".equalsIgnoreCase(host)) {
+
+            String token = data.getQueryParameter("token");
+            String signupNeeded = data.getQueryParameter("signup_needed");
+            String userid = data.getQueryParameter("userid");
+
+            // 기존 유저: 토큰으로 앱 내 로그인 처리
+            if (token != null && !token.isEmpty()) {
+                String url = HOME_URL + "auth/google/app-login?token=" + token;
+                Log.d(TAG, "DeepLink login → " + url);
+                myWebView.loadUrl(url);
+                return true;
+            }
+
+            // 신규 유저: 앱 내 구글 회원가입 페이지로 유도
+            if ("1".equals(signupNeeded) && userid != null && !userid.isEmpty()) {
+                String url = HOME_URL + "signup/google?userid=" + userid;
+                Log.d(TAG, "DeepLink signup → " + url);
+                myWebView.loadUrl(url);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // ========= 공통 URL 핸들러 =========
+
     private boolean handleUrlOverride(String url) {
         if (url == null) return false;
 
@@ -321,34 +364,17 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     email.setData(Uri.parse("mailto:"));
                 }
-                if (subject != null && !subject.isEmpty()) email.putExtra(Intent.EXTRA_SUBJECT, subject);
-                if (body != null && !body.isEmpty()) email.putExtra(Intent.EXTRA_TEXT, body);
-                if (cc != null && !cc.isEmpty()) email.putExtra(Intent.EXTRA_CC, new String[]{ cc });
+                if (subject != null && !subject.isEmpty())
+                    email.putExtra(Intent.EXTRA_SUBJECT, subject);
+                if (body != null && !body.isEmpty())
+                    email.putExtra(Intent.EXTRA_TEXT, body);
+                if (cc != null && !cc.isEmpty())
+                    email.putExtra(Intent.EXTRA_CC, new String[]{ cc });
 
                 startActivity(Intent.createChooser(email, "메일 앱 선택"));
-            } catch (ActivityNotFoundException e) {
-                try {
-                    MailTo mt2 = MailTo.parse(url);
-                    Intent fallback = new Intent(Intent.ACTION_SEND);
-                    fallback.setType("message/rfc822");
-
-                    String to2 = Uri.decode(mt2.getTo());
-                    String cc2 = Uri.decode(mt2.getCc());
-                    String subject2 = Uri.decode(mt2.getSubject());
-                    String body2 = Uri.decode(mt2.getBody());
-
-                    if (to2 != null && !to2.isEmpty()) fallback.putExtra(Intent.EXTRA_EMAIL, new String[]{ to2 });
-                    if (cc2 != null && !cc2.isEmpty()) fallback.putExtra(Intent.EXTRA_CC, new String[]{ cc2 });
-                    if (subject2 != null && !subject2.isEmpty()) fallback.putExtra(Intent.EXTRA_SUBJECT, subject2);
-                    if (body2 != null && !body2.isEmpty()) fallback.putExtra(Intent.EXTRA_TEXT, body2);
-
-                    startActivity(Intent.createChooser(fallback, "메일 앱 선택"));
-                } catch (Exception e2) {
-                    Toast.makeText(this, "메일 앱이 설치되어 있지 않습니다.", Toast.LENGTH_SHORT).show();
-                    Log.e(TAG, "No email app", e2);
-                }
-            } catch (Exception ex) {
-                Log.e(TAG, "handle mailto failed: " + url, ex);
+            } catch (Exception e) {
+                Toast.makeText(this, "메일 앱이 설치되어 있지 않습니다.", Toast.LENGTH_SHORT).show();
+                Log.e(TAG, "No email app", e);
             }
             return true;
         }
@@ -390,27 +416,41 @@ public class MainActivity extends AppCompatActivity {
             return true;
         }
 
-        // 구글 OAuth는 CCT
+        // ✅ 구글 OAuth URL은 보안 브라우저(Custom Tabs)에서 처리
         if (isGoogleAuthUrl(url)) {
             openInCustomTab(url);
             return true;
         }
 
-        // 그 외는 WebView 로드
-        return false;
+        // 나머지 http/https는 WebView 내에서 처리
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            return false;
+        }
+
+        // 그 외 스킴은 차단
+        return true;
     }
 
-    // ======= 유틸 =======
+    // ========= 유틸 =========
+
     private boolean isGoogleAuthUrl(String url) {
         if (url == null) return false;
-        Uri uri = Uri.parse(url);
-        String host = uri.getHost();
-        if (host == null) return false;
+        try {
+            Uri uri = Uri.parse(url);
+            String host = uri.getHost();
+            if (host == null) return false;
 
-        boolean isAccounts = host.equalsIgnoreCase("accounts.google.com");
-        boolean looksLikeOAuth = url.contains("/o/oauth2") || url.contains("oauth2")
-                || url.contains("ServiceLogin") || url.contains("/signin") || url.contains("challenge");
-        return isAccounts && looksLikeOAuth;
+            boolean isAccounts = host.equalsIgnoreCase("accounts.google.com");
+            boolean looksLikeOAuth =
+                    url.contains("oauth2")
+                            || url.contains("ServiceLogin")
+                            || url.contains("signin")
+                            || url.contains("challenge");
+
+            return isAccounts && looksLikeOAuth;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void openInCustomTab(String url) {
@@ -437,10 +477,38 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void applyWebViewWidthLimit() {
+        if (myWebView == null) return;
+        View parent = (View) myWebView.getParent();
+        if (parent == null) return;
+
+        parent.post(() -> {
+            float density = getResources().getDisplayMetrics().density;
+            int maxPx = Math.round(MAX_WIDTH_DP * density);
+            int parentW = parent.getWidth();
+            if (parentW == 0) return;
+
+            int target = Math.min(parentW, maxPx);
+            ViewGroup.LayoutParams lp = myWebView.getLayoutParams();
+            lp.width = target;
+            myWebView.setLayoutParams(lp);
+        });
+    }
+
+    private float parseFloatSafe(String s, float def) {
+        try { return Float.parseFloat(s); } catch (Exception e) { return def; }
+    }
+
+    private float clamp(float v, float min, float max) {
+        return Math.max(min, Math.min(max, v));
+    }
+
+    // ========= 생명주기 정리 =========
+
     @Override
     public void onConfigurationChanged(@NonNull Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        applyWebViewWidthLimit();   // ✅ 방향/화면 변경 시 재적용
+        applyWebViewWidthLimit();
     }
 
     @Override
@@ -470,7 +538,6 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        // ✅ TTS 정리
         ttsReady = false;
         if (tts != null) {
             try { tts.stop(); } catch (Exception ignored) {}
