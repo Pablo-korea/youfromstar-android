@@ -29,6 +29,8 @@ import androidx.annotation.Nullable;
 import androidx.annotation.Keep;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.browser.customtabs.CustomTabsIntent;
+import androidx.browser.customtabs.CustomTabsCallback;
+import androidx.browser.customtabs.CustomTabsSession;
 
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
@@ -305,6 +307,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ========= 딥링크 처리 =========
+    // ✅ 여기에서 신규/기존 유저 분기 후 WebView URL 결정
 
     private boolean handleDeepLink(Intent intent) {
         if (intent == null || myWebView == null) return false;
@@ -322,17 +325,26 @@ public class MainActivity extends AppCompatActivity {
             String signupNeeded = data.getQueryParameter("signup_needed");
             String userid = data.getQueryParameter("userid");
 
-            // 기존 유저: 토큰으로 앱 내 로그인 처리
+            Log.d(TAG, "딥링크 수신 - token: " + (token != null ? "있음" : "없음") +
+                    ", signup_needed: " + signupNeeded + ", userid: " + userid);
+
+            // ✅ 기존 유저: 토큰으로 앱 내 로그인 처리
             if (token != null && !token.isEmpty()) {
-                String url = HOME_URL + "auth/google/app-login?token=" + token;
+                String url = HOME_URL + "auth/google/app-login?token=" + Uri.encode(token);
                 Log.d(TAG, "DeepLink login → " + url);
                 myWebView.loadUrl(url);
                 return true;
             }
 
-            // 신규 유저: 앱 내 구글 회원가입 페이지로 유도
-            if ("1".equals(signupNeeded) && userid != null && !userid.isEmpty()) {
-                String url = HOME_URL + "signup/google?userid=" + userid;
+            // ✅ 신규 유저: 회원가입 화면으로 이동 (/signup)
+            if ("1".equals(signupNeeded)) {
+                String url;
+                if (userid != null && !userid.isEmpty()) {
+                    url = HOME_URL + "signup?provider=google&userid=" + Uri.encode(userid);
+                } else {
+                    // userid 없더라도 최소한 구글 회원가입 플로우 진입
+                    url = HOME_URL + "signup?provider=google";
+                }
                 Log.d(TAG, "DeepLink signup → " + url);
                 myWebView.loadUrl(url);
                 return true;
@@ -346,6 +358,45 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean handleUrlOverride(String url) {
         if (url == null) return false;
+
+        // ✅ youfromstar:// 딥링크 처리 (Custom Tabs에서 리다이렉트된 경우)
+        if (url.startsWith("youfromstar://")) {
+            Log.d(TAG, "딥링크 감지 (URL 핸들러): " + url);
+            try {
+                Uri uri = Uri.parse(url);
+                Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+                intent.setPackage(getPackageName());
+                startActivity(intent);
+                return true;
+            } catch (Exception e) {
+                Log.e(TAG, "딥링크 처리 실패", e);
+                // 예외 상황에서도 토큰/회원가입 정보 직접 파싱
+                if (url.contains("token=")) {
+                    String token = extractTokenFromUrl(url);
+                    if (token != null && myWebView != null) {
+                        String targetUrl = HOME_URL + "auth/google/app-login?token=" + Uri.encode(token);
+                        Log.d(TAG, "Fallback DeepLink login → " + targetUrl);
+                        myWebView.loadUrl(targetUrl);
+                        return true;
+                    }
+                } else if (url.contains("signup_needed=1")) {
+                    // userid 있으면 같이 넘기고, 없어도 최소 /signup 진입
+                    String userid = extractUseridFromUrl(url);
+                    String targetUrl;
+                    if (userid != null && !userid.isEmpty()) {
+                        targetUrl = HOME_URL + "signup?provider=google&userid=" + Uri.encode(userid);
+                    } else {
+                        targetUrl = HOME_URL + "signup?provider=google";
+                    }
+                    if (myWebView != null) {
+                        Log.d(TAG, "Fallback DeepLink signup → " + targetUrl);
+                        myWebView.loadUrl(targetUrl);
+                        return true;
+                    }
+                }
+            }
+            return true;
+        }
 
         // mailto:
         if (url.startsWith("mailto:")) {
@@ -455,13 +506,48 @@ public class MainActivity extends AppCompatActivity {
 
     private void openInCustomTab(String url) {
         try {
-            CustomTabsIntent cct = new CustomTabsIntent.Builder()
-                    .setShowTitle(true)
-                    .build();
+            CustomTabsIntent.Builder builder = new CustomTabsIntent.Builder();
+            builder.setShowTitle(true);
+
+            CustomTabsIntent cct = builder.build();
+
+            Intent intent = cct.intent;
+            intent.setData(Uri.parse(url));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
             cct.launchUrl(this, Uri.parse(url));
+
+            Log.d(TAG, "Custom Tabs 열림: " + url);
         } catch (Exception e) {
+            Log.e(TAG, "Custom Tabs 열기 실패", e);
             Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             startActivity(i);
+        }
+    }
+
+    private String extractTokenFromUrl(String url) {
+        try {
+            int start = url.indexOf("token=");
+            if (start == -1) return null;
+            start += 6; // "token=" 길이
+            int end = url.indexOf("&", start);
+            if (end == -1) end = url.length();
+            return url.substring(start, end);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String extractUseridFromUrl(String url) {
+        try {
+            int start = url.indexOf("userid=");
+            if (start == -1) return null;
+            start += 7; // "userid=" 길이
+            int end = url.indexOf("&", start);
+            if (end == -1) end = url.length();
+            return url.substring(start, end);
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -545,21 +631,5 @@ public class MainActivity extends AppCompatActivity {
             tts = null;
         }
         super.onDestroy();
-    }
-
-    @Override
-    public void onBackPressed() {
-        if (myWebView != null && myWebView.canGoBack()) {
-            myWebView.goBack();
-        } else {
-            long currentTime = System.currentTimeMillis();
-            if (currentTime - backPressedTime < BACK_INTERVAL) {
-                finishAffinity();
-                System.exit(0);
-            } else {
-                backPressedTime = currentTime;
-                Toast.makeText(this, "뒤로 가기를 한 번 더 누르면 앱이 종료됩니다.", Toast.LENGTH_SHORT).show();
-            }
-        }
     }
 }
