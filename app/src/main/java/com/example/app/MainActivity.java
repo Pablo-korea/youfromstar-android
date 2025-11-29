@@ -28,6 +28,7 @@ import android.widget.Toast;
 import androidx.annotation.Nullable;
 import androidx.annotation.Keep;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AlertDialog;   // ✅ 종료 확인 다이얼로그용 import
 import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.browser.customtabs.CustomTabsCallback;
 import androidx.browser.customtabs.CustomTabsSession;
@@ -42,13 +43,17 @@ import java.util.Locale;
 import android.content.res.Configuration;
 import androidx.annotation.NonNull;
 import android.view.ViewGroup;
+import android.webkit.CookieManager;
+import android.webkit.WebStorage;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
     private static final String HOME_URL = "https://youfromstar.odha.com/";
-    private static final int BACK_INTERVAL = 2000;
-    private static final int MAX_WIDTH_DP = 420;
+    private static final int MAX_WIDTH_DP = 440;
+
+    private static final int BACK_INTERVAL = 500;  // 1초 이내 두 번 눌렀을 때만 종료팝업
+    private static final String MAIN_URL = HOME_URL + "static/main/";   // 메인 메뉴 URL    private static final int MAX_WIDTH_DP = 440;
 
     private WebView myWebView;
     private long backPressedTime = 0;
@@ -589,8 +594,126 @@ public class MainActivity extends AppCompatActivity {
         return Math.max(min, Math.min(max, v));
     }
 
+    // ========= 🔴 뒤로가기 처리 + 종료 확인 다이얼로그 =========
+
+    @Override
+    public void onBackPressed() {
+        if (myWebView == null) {
+            super.onBackPressed();
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        boolean isDoublePress = (now - backPressedTime) <= BACK_INTERVAL;
+        backPressedTime = now;
+
+        // 1️⃣ 1초 이내 두 번 연속 백 → 어디서든 종료 안내 팝업
+        if (isDoublePress) {
+            showExitDialog();
+            return;
+        }
+
+        // 2️⃣ 현재 URL 기준으로 메뉴 분기
+        String currentUrl = myWebView.getUrl();
+        if (currentUrl != null) {
+            try {
+                Uri uri = Uri.parse(currentUrl);
+                String path = uri.getPath();   // 예: /static/chat/counselor/, /static/member/, /static/today/, /static/main/
+
+                // (1) 메인(/static/main/)에서 단발 뒤로 → 종료 안내 팝업
+                if (isMainPath(path)) {
+                    showExitDialog();
+                    return;
+                }
+
+                // (2) today / member / chat/counselor 에서 단발 뒤로 → 메인으로 이동
+                if (isTodayMemberChatPath(path)) {
+                    myWebView.loadUrl(MAIN_URL);   // https://youfromstar.odha.com/static/main/
+                    return;
+                }
+
+            } catch (Exception ignored) {
+            }
+        }
+
+        // 3️⃣ 그 외 화면은 기존 WebView 히스토리
+        if (myWebView.canGoBack()) {
+            myWebView.goBack();
+        } else {
+            showExitDialog();
+        }
+    }
+
     // ========= 생명주기 정리 =========
 
+    private String normalizePath(String path) {
+        if (path == null) return "";
+        // 쿼리 제거
+        int qIdx = path.indexOf("?");
+        if (qIdx != -1) {
+            path = path.substring(0, qIdx);
+        }
+        path = path.trim();
+
+        // 끝에 슬래시 하나만 날리기 (루트 "/"는 유지)
+        if (path.endsWith("/") && path.length() > 1) {
+            path = path.substring(0, path.length() - 1);
+        }
+        return path;
+    }
+
+    // 메인 화면 경로 판별
+// 메인 화면 여부: /, /static/main, /static/main/
+    private boolean isMainPath(String rawPath) {
+        String path = normalizePath(rawPath);
+
+        return path.equals("")            // null → "" 처리된 경우
+                || path.equals("/")      // 루트
+                || path.equals("/static/main");  // 우리가 쓰는 메인
+    }
+
+    // today / member / chat/counselor 화면 여부
+    private boolean isTodayMemberChatPath(String rawPath) {
+        String path = normalizePath(rawPath).toLowerCase();
+
+        return path.equals("/static/today")
+                || path.equals("/static/member")
+                || path.equals("/static/chat/counselor");
+    }
+    private void showExitDialog() {
+        new AlertDialog.Builder(this)
+                .setTitle("앱 종료")
+                .setMessage("정말 별당을 종료하시겠습니까?")
+                .setPositiveButton("예", (dialog, which) -> {
+                    dialog.dismiss();
+
+                    // ✅ 1) WebView 쿠키 삭제
+                    try {
+                        CookieManager cookieManager = CookieManager.getInstance();
+                        cookieManager.removeAllCookies(null);   // async
+                        cookieManager.flush();
+                    } catch (Exception ignored) {}
+
+                    // ✅ 2) WebView LocalStorage 삭제
+                    try {
+                        if (myWebView != null) {
+                            myWebView.clearCache(true);
+                            myWebView.clearHistory();
+                            myWebView.clearFormData();
+                        }
+                        WebStorage.getInstance().deleteAllData(); // localStorage 삭제
+                    } catch (Exception ignored) {}
+
+                    // 필요하면 SharedPreferences 삭제도 추가 가능
+                    // getSharedPreferences("app", MODE_PRIVATE).edit().clear().apply();
+
+                    // ✅ 3) 앱 종료
+                    finish();
+                })
+                .setNegativeButton("아니오", (dialog, which) -> dialog.dismiss())
+                .setCancelable(true)
+                .show();
+    }
     @Override
     public void onConfigurationChanged(@NonNull Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
