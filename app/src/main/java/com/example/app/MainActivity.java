@@ -686,34 +686,14 @@ public class MainActivity extends AppCompatActivity {
                 .setMessage("정말 별당을 종료하시겠습니까?")
                 .setPositiveButton("예", (dialog, which) -> {
                     dialog.dismiss();
-
-                    // ✅ 1) WebView 쿠키 삭제
-                    try {
-                        CookieManager cookieManager = CookieManager.getInstance();
-                        cookieManager.removeAllCookies(null);   // async
-                        cookieManager.flush();
-                    } catch (Exception ignored) {}
-
-                    // ✅ 2) WebView LocalStorage 삭제
-                    try {
-                        if (myWebView != null) {
-                            myWebView.clearCache(true);
-                            myWebView.clearHistory();
-                            myWebView.clearFormData();
-                        }
-                        WebStorage.getInstance().deleteAllData(); // localStorage 삭제
-                    } catch (Exception ignored) {}
-
-                    // 필요하면 SharedPreferences 삭제도 추가 가능
-                    // getSharedPreferences("app", MODE_PRIVATE).edit().clear().apply();
-
-                    // ✅ 3) 앱 종료
+                    // 👉 아무것도 건드리지 않고 그냥 액티비티만 종료
                     finish();
                 })
                 .setNegativeButton("아니오", (dialog, which) -> dialog.dismiss())
                 .setCancelable(true)
                 .show();
     }
+
     @Override
     public void onConfigurationChanged(@NonNull Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
